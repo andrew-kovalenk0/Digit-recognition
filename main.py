@@ -54,8 +54,6 @@ class DigitRecognation:
         for i in range(self.train_data.shape[0]):
             a1 = np.append(a1, [relu(np.dot(self.w1, self.train_data[i]) + self.b1)], axis=0)
             z1 = np.append(z1, [np.dot(self.w1, self.train_data[i]) + self.b1], axis=0)
-
-        for i in range(self.train_data.shape[0]):
             a2 = np.append(a2, [softmax(np.dot(self.w2, a1[i]) + self.b2)], axis=0)
             z2 = np.append(z2, [np.dot(self.w2, a1[i]) + self.b2], axis=0)
 
