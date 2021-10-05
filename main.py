@@ -1,35 +1,36 @@
+import matplotlib.pyplot as plt
 from mnist import MNIST
 import numpy as np
 
 
-def cost_func(a, label, func):
-    result = np.empty(a.shape[0])
-    if func == 'mse':
-        result = (np.square(a - label)).mean(axis=1)
-    if func == 'ce':
-        pass
-    return result
+def loss(yp, y, func):
+    return globals()[func](yp, y)
 
 
-def softmax(Z):
-    exp_sum = np.sum(np.exp(Z))
-    return np.exp(Z) / exp_sum
+def mse(yp, y):
+    return np.square(yp - y).mean()
 
 
-def relu(Z):
-    return np.maximum(0, Z)
+def ce(yp, y):
+    predictions = np.clip(yp, 1e-12, 1. - 1e-12)
+    return -np.sum(y * np.log(predictions + 1e-9)) / predictions.shape[0]
 
 
-def softmax_backward(Z):
-    der = Z.copy()
-    der = softmax(der) * (1 - softmax(der))
+def softmax(z):
+    return np.exp(z) / sum(np.exp(z))
 
-    return der
+
+def relu(z):
+    return np.maximum(z, 0)
+
+
+def relu_backward(z):
+    return z > 0
 
 
 class DigitRecognation:
     def __init__(self, train_data, train_labels, loss_label):
-        train_data = (train_data - 127.5) / 255.0
+        train_data = train_data.T / 255
         self.train_data = train_data
 
         train_labels = train_labels[:, np.newaxis]
@@ -37,32 +38,61 @@ class DigitRecognation:
         for i in range(train_labels.shape[0]):
             buf[i] = [0] * 11
             buf[i, train_labels[i]] = 1
-        self.train_labels = buf
+        self.train_labels = buf.T
 
         self.loss_label = loss_label
-        self.w1 = np.random.randint(0, 10, (128, 784))
-        self.b1 = np.random.randint(0, 10, 128)
-        self.w2 = np.random.randint(0, 10, (11, 128))
-        self.b2 = np.random.randint(0, 10, 11)
+        self.w1 = np.random.random((128, 784)) - 0.5
+        self.b1 = np.random.random((128, 1)) - 0.5
+        self.w2 = np.random.random((11, 128)) - 0.5
+        self.b2 = np.random.random((11, 1)) - 0.5
 
-    def fit(self):
-        a1 = np.empty((0, 128))
-        z1 = np.empty((0, 128))
-        a2 = np.empty((0, 11))
-        z2 = np.empty((0, 11))
+    def fit(self, iterations):
+        m = self.train_data.shape[0]
+        y = self.train_labels
+        alpha = 0.0005
+        error = []
+        momentum = 0.9
+        change_dw2 = np.random.random((11, 128)) * 0.001
+        change_db2 = np.random.random((11, 1)) * 0.001
+        change_dw1 = np.random.random((128, 784)) * 0.001
+        change_db1 = np.random.random((128, 1)) * 0.001
+        for i in range(iterations):
+            z1 = self.w1 @ self.train_data + self.b1
+            a1 = relu(z1)
+            z2 = self.w2 @ a1 + self.b2
+            a2 = softmax(z2)
 
-        for i in range(self.train_data.shape[0]):
-            a1 = np.append(a1, [relu(np.dot(self.w1, self.train_data[i]) + self.b1)], axis=0)
-            z1 = np.append(z1, [np.dot(self.w1, self.train_data[i]) + self.b1], axis=0)
-            a2 = np.append(a2, [softmax(np.dot(self.w2, a1[i]) + self.b2)], axis=0)
-            z2 = np.append(z2, [np.dot(self.w2, a1[i]) + self.b2], axis=0)
+            dz2 = a2 - y
+            dw2 = 1 / m * dz2 @ a1.T
+            db2 = np.array([1 / m * np.sum(dz2, axis=1)]).T
+            dz1 = self.w2.T.dot(dz2) * relu_backward(z1)
+            dw1 = 1 / m * dz1 @ self.train_data.T
+            db1 = np.array([1 / m * np.sum(dz1, axis=1)]).T
 
-        cost = cost_func(a2, self.train_labels, self.loss_label)
+            change_w2 = change_dw2 * momentum - alpha * dw2
+            change_b2 = change_db2 * momentum - alpha * db2
+            change_w1 = change_dw1 * momentum - alpha * dw1
+            change_b1 = change_db1 * momentum - alpha * db1
 
-        s2 = a2 - self.train_labels
+            self.w2 += change_w2
+            self.b2 += change_b2
+            self.w1 += change_w1
+            self.b1 += change_b1
 
-    def predict(self):
-        pass
+            error.append(loss(a2, y, self.loss_label))
+            print(i, error[i])
+
+        plt.plot(range(iterations), error)
+        plt.xlabel("Iterations")
+        plt.ylabel("Error")
+        plt.title(f"Learning rate: {alpha}")
+        plt.show()
+
+    def predict(self, test_image):
+        a1 = relu(self.w1 @ (test_image.T / 255) + self.b1)
+        a2 = softmax(self.w2 @ a1 + self.b2)
+        return np.argmax(a2, axis=0)
+
 
 if __name__ == '__main__':
     mndata = MNIST(r'data/')
@@ -71,6 +101,10 @@ if __name__ == '__main__':
     train_images = images[:40000, :]
     train_label = labels[:40000]
     test_images = images[40001:, :]
-    test_label = labels[40001:]
-    model = DigitRecognation(train_images[0:2, :], train_label[0:2], 'mse')
-    model.fit()
+    test_labels = labels[40001:]
+
+    model = DigitRecognation(train_images, train_label, 'ce')
+    model.fit(100)
+    predict = model.predict(test_images[0:10, :])
+    print(predict)
+    print(test_labels[0:10])
