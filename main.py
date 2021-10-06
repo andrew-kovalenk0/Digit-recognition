@@ -12,12 +12,12 @@ def mse(yp, y):
 
 
 def ce(yp, y):
-    predictions = np.clip(yp, 1e-12, 1. - 1e-12)
-    return -np.sum(y * np.log(predictions + 1e-9)) / predictions.shape[0]
+    return -np.sum(y * np.log(yp)) / y.shape[1]
 
 
 def softmax(z):
-    return np.exp(z) / sum(np.exp(z))
+    e = np.exp(z)
+    return e / (e.sum(axis=0) + 1e-9)
 
 
 def relu(z):
@@ -28,17 +28,18 @@ def relu_backward(z):
     return z > 0
 
 
-class DigitRecognation:
-    def __init__(self, train_data, train_labels, loss_label):
-        train_data = train_data.T / 255
-        self.train_data = train_data
+def one_hot(y):
+    result = np.zeros((y.size, y.max() + 2))
+    result[np.arange(y.size), y] = 1
+    return result.T
 
-        train_labels = train_labels[:, np.newaxis]
-        buf = np.empty((train_labels.shape[0], 11))
-        for i in range(train_labels.shape[0]):
-            buf[i] = [0] * 11
-            buf[i, train_labels[i]] = 1
-        self.train_labels = buf.T
+
+class DigitRecognation:
+    def __init__(self, train_data, train_labels, valid_x, valid_y, loss_label):
+        self.train_data = train_data.T / 255
+        self.valid_data = valid_x.T / 255
+        self.valid_label = one_hot(valid_y)
+        self.train_labels = one_hot(train_labels)
 
         self.loss_label = loss_label
         self.w1 = np.random.random((128, 784)) - 0.5
@@ -46,11 +47,12 @@ class DigitRecognation:
         self.w2 = np.random.random((11, 128)) - 0.5
         self.b2 = np.random.random((11, 1)) - 0.5
 
-    def fit(self, iterations):
+    def fit(self, iterations, batches):
         m = self.train_data.shape[0]
         y = self.train_labels
-        alpha = 0.0005
-        error = []
+        alpha = 0.01
+        error_train = []
+        error_valid = []
         momentum = 0.9
         change_dw2 = np.random.random((11, 128)) * 0.001
         change_db2 = np.random.random((11, 1)) * 0.001
@@ -65,7 +67,7 @@ class DigitRecognation:
             dz2 = a2 - y
             dw2 = 1 / m * dz2 @ a1.T
             db2 = np.array([1 / m * np.sum(dz2, axis=1)]).T
-            dz1 = self.w2.T.dot(dz2) * relu_backward(z1)
+            dz1 = self.w2.T @ dz2 * relu_backward(z1)
             dw1 = 1 / m * dz1 @ self.train_data.T
             db1 = np.array([1 / m * np.sum(dz1, axis=1)]).T
 
@@ -79,10 +81,20 @@ class DigitRecognation:
             self.w1 += change_w1
             self.b1 += change_b1
 
-            error.append(loss(a2, y, self.loss_label))
-            print(i, error[i])
+            # self.w2 -= alpha * dw2
+            # self.b2 -= alpha * db2
+            # self.w1 -= alpha * dw1
+            # self.b1 -= alpha * db1
 
-        plt.plot(range(iterations), error)
+            print(i, z2[5, 0], ' - ', a2[5, 0])
+
+            error_train.append(loss(a2, y, self.loss_label))
+            a1 = relu(self.w1 @ self.valid_data + self.b1)
+            a2 = softmax(self.w2 @ a1 + self.b2)
+            error_valid.append(loss(a2, self.valid_label, self.loss_label))
+
+        plt.plot(range(iterations), error_train, label='Train')
+        plt.plot(range(iterations), error_valid, label='Valid')
         plt.xlabel("Iterations")
         plt.ylabel("Error")
         plt.title(f"Learning rate: {alpha}")
@@ -100,11 +112,10 @@ if __name__ == '__main__':
     images, labels = np.array(images), np.array(labels)
     train_images = images[:40000, :]
     train_label = labels[:40000]
-    test_images = images[40001:, :]
-    test_labels = labels[40001:]
+    test_images = images[40001:41000, :]
+    test_labels = labels[40001:41000]
+    valid_images = images[41001:, :]
+    valid_labels = labels[41001:]
 
-    model = DigitRecognation(train_images, train_label, 'ce')
-    model.fit(100)
-    predict = model.predict(test_images[0:10, :])
-    print(predict)
-    print(test_labels[0:10])
+    model = DigitRecognation(train_images, train_label, valid_images, valid_labels, 'ce')
+    model.fit(40, 1000)
