@@ -59,8 +59,9 @@ class Layer:
 
 
 class DigitRecognation(Layer):
-    def __init__(self, in_size, out_size, hiden_layers, hiden_layers_size, iterations, batch_size):
+    def __init__(self, in_size, out_size, hiden_layers, hiden_layers_size, iterations, batch_size, loss_label):
         super().__init__(in_size, out_size, batch_size)
+        self.loss_label = loss_label
         layers = [Layer(in_size, hiden_layers_size[0], batch_size)]
         for i in range(hiden_layers - 1):
             layers.append(Layer(hiden_layers_size[i], hiden_layers_size[i + 1], batch_size))
@@ -70,13 +71,12 @@ class DigitRecognation(Layer):
         self.layers = layers
         self.hiden_layers = hiden_layers
         
-    def fit(self, train_data, train_labels, valid_x, valid_y, loss_label):
+    def fit(self, train_data, train_labels, valid_x, valid_y):
         train_data = (train_data.T - 127.5) / 255
         valid_data = (valid_x.T - 127.5) / 255
         valid_label = one_hot(valid_y)
         train_labels = one_hot(train_labels)
         batches = int(train_data.shape[1] / self.batch_size)
-        loss_label = loss_label
         alpha = 0.01
         error_train = np.zeros(self.iterations)
         error_valid = np.zeros(self.iterations)
@@ -100,16 +100,16 @@ class DigitRecognation(Layer):
                 db1 = np.array([1 / self.batch_size * np.sum(dz1, axis=1)]).T
 
                 for li in range(self.hiden_layers + 1):
-                    self.layers[li].change_dw = self.layers[li].change_dw * momentum - alpha * dw2
-                    self.layers[li].change_db = self.layers[li].change_db * momentum - alpha * db2
+                    self.layers[li].change_dw = self.layers[li].change_dw * momentum - alpha * self.layers[li].dw
+                    self.layers[li].change_db = self.layers[li].change_db * momentum - alpha * self.layers[li].db
                     self.layers[li].w += self.layers[li].change_dw
                     self.layers[li].b += self.layers[li].change_db
 
                 if j == batches - 1:
-                    error_train[i] = loss(self.layers[1].a, y, loss_label)
+                    error_train[i] = loss(self.layers[1].a, y, self.loss_label)
                     a1 = relu(self.layers[0].w @ valid_data + self.layers[0].b)
                     a2 = softmax(self.layers[1].w @ a1 + self.layers[1].b)
-                    error_valid[i] = loss(a2, valid_label, loss_label)
+                    error_valid[i] = loss(a2, valid_label, self.loss_label)
 
         plt.plot(range(1, self.iterations + 1), error_train, label='Train')
         plt.plot(range(1, self.iterations + 1), error_valid, label='Valid')
@@ -136,8 +136,8 @@ if __name__ == '__main__':
     valid_images = images[41001:, :]
     valid_labels = labels[41001:]
 
-    model = DigitRecognation(784, 10, 2, [64, 64], 10, 625)
-    model.fit(train_images, train_label, valid_images, valid_labels, 'ce')
+    model = DigitRecognation(784, 10, 2, [64, 64], 10, 625, 'ce')
+    model.fit(train_images, train_label, valid_images, valid_labels)
 
     predictions = model.predict(test_images)
     print(f'\nAccuracy: {get_accuracy(predictions, test_labels)}')
