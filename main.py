@@ -46,6 +46,9 @@ class Layer:
         self.change_db = np.random.uniform(-0.01, 0.01, [out_size, 1])
         self.z = np.zeros((out_size, batch_size))
         self.a = np.zeros((out_size, batch_size))
+        self.dz = np.zeros((out_size, batch_size))
+        self.db = np.zeros((out_size, batch_size))
+        self.dw = np.zeros((out_size, batch_size))
 
     def forward_prop(self, prev_a):
         self.z = self.w @ prev_a + self.b
@@ -92,12 +95,17 @@ class DigitRecognation(Layer):
                     self.layers[li].z = self.layers[li].w @ self.layers[li - 1].a + self.layers[li].b
                     self.layers[li].a = softmax(self.layers[li].z)
 
-                dz2 = self.layers[1].a - y
-                dw2 = 1 / self.batch_size * dz2 @ self.layers[0].a.T
-                db2 = np.array([1 / self.batch_size * np.sum(dz2, axis=1)]).T
-                dz1 = self.layers[1].w.T @ dz2 * relu_backward(self.layers[0].z)
-                dw1 = 1 / self.batch_size * dz1 @ train_data_buf.T
-                db1 = np.array([1 / self.batch_size * np.sum(dz1, axis=1)]).T
+                last = self.hiden_layers
+                self.layers[last].dz = self.layers[last].a - y
+                self.layers[last].dw = 1 / self.batch_size * self.layers[last].dz @ self.layers[last-1].a.T
+                self.layers[last].db = np.array([1 / self.batch_size * np.sum(self.layers[last].dz, axis=1)]).T
+                self.layers[0].a = train_data_buf
+
+                # Error in calc if more then 1 hiden layer
+                for li in range(self.hiden_layers - 1, -1, -1):
+                    self.layers[li].dz = self.layers[li + 1].w.T @ self.layers[li + 1].dz * relu_backward(self.layers[li].z)
+                    self.layers[li].dw = 1 / self.batch_size * self.layers[li].dz @ self.layers[li].a.T
+                    self.layers[li].db = np.array([1 / self.batch_size * np.sum(self.layers[li].dz, axis=1)]).T
 
                 for li in range(self.hiden_layers + 1):
                     self.layers[li].change_dw = self.layers[li].change_dw * momentum - alpha * self.layers[li].dw
@@ -106,10 +114,11 @@ class DigitRecognation(Layer):
                     self.layers[li].b += self.layers[li].change_db
 
                 if j == batches - 1:
-                    error_train[i] = loss(self.layers[1].a, y, self.loss_label)
-                    a1 = relu(self.layers[0].w @ valid_data + self.layers[0].b)
-                    a2 = softmax(self.layers[1].w @ a1 + self.layers[1].b)
-                    error_valid[i] = loss(a2, valid_label, self.loss_label)
+                    error_train[i] = loss(self.layers[last].a, y, self.loss_label)
+                    a_list = [relu(self.layers[0].w @ valid_data + self.layers[0].b)]
+                    for li in range(1, self.hiden_layers + 1):
+                        a_list.append(softmax(self.layers[li].w @ a_list[li-1] + self.layers[li].b))
+                    error_valid[i] = loss(a_list[-1], valid_label, self.loss_label)
 
         plt.plot(range(1, self.iterations + 1), error_train, label='Train')
         plt.plot(range(1, self.iterations + 1), error_valid, label='Valid')
@@ -136,7 +145,7 @@ if __name__ == '__main__':
     valid_images = images[41001:, :]
     valid_labels = labels[41001:]
 
-    model = DigitRecognation(784, 10, 2, [64, 64], 10, 625, 'ce')
+    model = DigitRecognation(784, 10, 1, [64], 20, 625, 'ce')
     model.fit(train_images, train_label, valid_images, valid_labels)
 
     predictions = model.predict(test_images)
